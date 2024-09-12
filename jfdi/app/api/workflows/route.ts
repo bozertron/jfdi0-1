@@ -1,26 +1,72 @@
-import { NextResponse } from 'next/server'
+import { NextResponse } from 'next/server';
+import dbConnect from '@/lib/db/connection';
+import { SharedWorkflow } from '@/lib/db/sharedSchema';
+import { PersonalWorkflow } from '@/lib/db/userSchema';
 
-type Workflow = {
-  id: number
-  name: string
-  steps: string[]
-}
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const userId = searchParams.get('userId');
+  const isShared = searchParams.get('shared') === 'true';
 
-let workflows: Workflow[] = []
+  await dbConnect();
 
-export async function GET() {
-  return NextResponse.json(workflows)
+  try {
+    let workflows;
+    if (isShared) {
+      workflows = await SharedWorkflow.find();
+    } else {
+      if (!userId) {
+        return NextResponse.json({ error: "UserId is required for personal workflows" }, { status: 400 });
+      }
+      workflows = await PersonalWorkflow.find({ userId });
+    }
+    return NextResponse.json(workflows);
+  } catch (error) {
+    console.error("Error fetching workflows:", error);
+    return NextResponse.json({ error: "Failed to fetch workflows" }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
-  const body = await request.json()
-  const newWorkflow: Workflow = {
-    id: workflows.length + 1,
-    name: body.name,
-    steps: body.steps,
+  const { searchParams } = new URL(request.url);
+  const userId = searchParams.get('userId');
+  const isShared = searchParams.get('shared') === 'true';
+
+  await dbConnect();
+
+  try {
+    const body = await request.json();
+    
+    if (!body.name || !Array.isArray(body.steps) || body.steps.length === 0) {
+      return NextResponse.json({ error: "Invalid workflow data" }, { status: 400 });
+    }
+
+    let newWorkflow;
+    if (isShared) {
+      newWorkflow = new SharedWorkflow({
+        name: body.name,
+        description: body.description,
+        steps: body.steps,
+        createdBy: userId
+      });
+    } else {
+      if (!userId) {
+        return NextResponse.json({ error: "UserId is required for personal workflows" }, { status: 400 });
+      }
+      newWorkflow = new PersonalWorkflow({
+        userId,
+        name: body.name,
+        description: body.description,
+        steps: body.steps
+      });
+    }
+
+    await newWorkflow.save();
+    return NextResponse.json(newWorkflow, { status: 201 });
+  } catch (error) {
+    console.error("Error creating workflow:", error);
+    return NextResponse.json({ error: "Failed to create workflow" }, { status: 500 });
   }
-  workflows.push(newWorkflow)
-  return NextResponse.json(newWorkflow, { status: 201 })
 }
 
 export async function OPTIONS() {
@@ -29,5 +75,5 @@ export async function OPTIONS() {
     headers: {
       'Allow': 'GET, POST',
     },
-  })
+  });
 }
